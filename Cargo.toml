@@ -1,6 +1,6 @@
 [package]
 name = "pmpmc"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "An ordered multi producer multi consumer channel"
 repository = "https://github.com/bcpeinhardt/pmpmc"
