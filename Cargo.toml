@@ -6,6 +6,7 @@ description = "An ordered multi producer multi consumer channel"
 repository = "https://github.com/bcpeinhardt/pmpmc"
 keywords = ["channel", "mpmc", "mpsc", "async", "thread"]
 categories = ["data-structures", "asynchronous", "concurrency"]
+license = "MIT"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
