@@ -1,8 +1,8 @@
 [package]
 name = "pmpmc"
-version = "0.1.2"
+version = "1.0.0"
 edition = "2021"
-description = "An ordered multi producer multi consumer channel"
+description = "A priority multi producer multi consumer channel"
 repository = "https://github.com/bcpeinhardt/pmpmc"
 keywords = ["channel", "mpmc", "mpsc", "async", "thread"]
 categories = ["data-structures", "asynchronous", "concurrency"]

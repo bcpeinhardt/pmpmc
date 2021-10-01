@@ -1,7 +1,8 @@
 //! Priority Multi Consumer Multi Producer Channel
 //!
-//! This is a quick and dirty implementation of a multi producer multi consumer channel for elements that implement the Ord trait,
-//! which gives the user two methods on the receiver: recv_greatest and recv_least.
+//! This is a simple implementation of a multi producer multi consumer channel for elements that implement the Ord trait,
+//! which replaces the typical rx.recv() with rx.recv_greatest(). It is basically just using the typical Arc<Mutex<>> wrapper to push
+//! to a std::collections::BinaryHeap from one thread and to pop from that heap in another thread. 
 //!
 //! # Example
 //! ```
@@ -23,41 +24,22 @@
 //! assert_eq!(rx_new.recv_greatest(), Some(1));
 //! assert_eq!(rx_new.recv_greatest(), None);
 //! assert_eq!(rx_new.recv_greatest(), None);
-//!
-//! let tx_new = tx.clone();
-//! let rx_new = rx.clone();
-//!
-//! let _ = std::thread::spawn(move || {
-//!     tx_new.send(2);
-//!     tx_new.send(1);
-//!     tx_new.send(3);
-//! })
-//! .join();
-//!
-//! assert_eq!(rx_new.recv_least(), Some(1));
-//! assert_eq!(rx_new.recv_least(), Some(2));
-//! assert_eq!(rx_new.recv_least(), Some(3));
-//! assert_eq!(rx_new.recv_least(), None);
-//! assert_eq!(rx_new.recv_least(), None);
 //! ```
 //!
 //! I am using it for automatically scheduling tasks (workers now pull tasks off the channel in order of priority) but you can use it
 //! any time you want to push to a list from one or more threads and sort the list before receiving on another thread.
-//!
-//! This crate is not optimized in any way, please don't use it in production. When I have time I may come back and make it more efficient
-//! and robust.
 
 // Imports
 use std::sync::{Arc, Mutex};
+use std::collections::BinaryHeap;
 
-// By convention, we have an inner struct which holds a mutex to the vec. When I come back to make this more efficient,
-// we'll probably use some other data structure (linked_list, veqdeque, idk we'll see)
+// By convention, we call this struct Inner, but it's just a place to put the Mutex to the Heap
 struct Inner<T> {
-    queue: Mutex<Vec<T>>,
+    queue: Mutex<BinaryHeap<T>>,
 }
 
 /// The sender struct allows for sending items across the channel.
-/// For use, see method send
+/// For use, see method send.
 pub struct Sender<T> {
     inner: Arc<Inner<T>>,
 }
@@ -71,7 +53,7 @@ impl<T> Clone for Sender<T> {
     }
 }
 
-impl<T> Sender<T> {
+impl<T: std::cmp::Ord> Sender<T> {
     /// The send method allows for sending items across the channel.
     ///
     /// # Example
@@ -88,8 +70,8 @@ impl<T> Sender<T> {
     }
 }
 
-/// The receiver struct allows for receiving items across the channel
-/// for use, see methods recv_greatest() and recv_least()
+/// The receiver struct allows for receiving items across the channel.
+/// For use, see method recv_greatest().
 pub struct Receiver<T> {
     inner: Arc<Inner<T>>,
 }
@@ -118,27 +100,6 @@ impl<T: std::cmp::Ord> Receiver<T> {
     /// ```
     pub fn recv_greatest(&self) -> Option<T> {
         let mut queue = self.inner.queue.lock().expect("Poison error");
-        queue.sort();
-        queue.pop()
-    }
-
-    /// Sorts the elements in the channel and returns Some(least) or a None if the channel is empty
-    /// # Example
-    /// ```
-    /// use pmpmc::pmpmc;
-    /// let (tx, rx) = pmpmc();
-    ///
-    /// assert_eq!(tx.send(3), ());
-    /// assert_eq!(tx.send(1), ());
-    /// assert_eq!(tx.send(2), ());
-    /// assert_eq!(rx.recv_least(), Some(1));
-    /// assert_eq!(rx.recv_least(), Some(2));
-    /// assert_eq!(rx.recv_least(), Some(3));
-    /// ```
-    pub fn recv_least(&self) -> Option<T> {
-        let mut queue = self.inner.queue.lock().expect("Poison error");
-        queue.sort();
-        queue.reverse();
         queue.pop()
     }
 }
@@ -149,12 +110,13 @@ impl<T: std::cmp::Ord> Receiver<T> {
 /// ```
 /// use pmpmc::pmpmc;
 /// let (tx, rx) = pmpmc();
-/// tx.send(3)
+/// tx.send(3);
+/// assert_eq!(rx.recv_greatest(), Some(3));
 /// ```
 /// The compiler will infer the type once an item is sent.
-pub fn pmpmc<T>() -> (Sender<T>, Receiver<T>) {
+pub fn pmpmc<T: std::cmp::Ord>() -> (Sender<T>, Receiver<T>) {
     let inner = Inner {
-        queue: Mutex::new(Vec::new()),
+        queue: Mutex::new(BinaryHeap::new()),
     };
     let shared_inner = Arc::new(inner);
     (
@@ -190,22 +152,6 @@ mod tests {
         assert_eq!(rx_new.recv_greatest(), Some(1));
         assert_eq!(rx_new.recv_greatest(), None);
         assert_eq!(rx_new.recv_greatest(), None);
-
-        let tx_new = tx.clone();
-        let rx_new = rx.clone();
-
-        let _ = std::thread::spawn(move || {
-            tx_new.send(2);
-            tx_new.send(1);
-            tx_new.send(3);
-        })
-        .join();
-
-        assert_eq!(rx_new.recv_least(), Some(1));
-        assert_eq!(rx_new.recv_least(), Some(2));
-        assert_eq!(rx_new.recv_least(), Some(3));
-        assert_eq!(rx_new.recv_least(), None);
-        assert_eq!(rx_new.recv_least(), None);
     }
 
     #[test]
@@ -217,13 +163,6 @@ mod tests {
         assert_eq!(rx.recv_greatest(), Some(3));
         assert_eq!(rx.recv_greatest(), Some(2));
         assert_eq!(rx.recv_greatest(), Some(1));
-
-        assert_eq!(tx.send(3), ());
-        assert_eq!(tx.send(1), ());
-        assert_eq!(tx.send(2), ());
-        assert_eq!(rx.recv_least(), Some(1));
-        assert_eq!(rx.recv_least(), Some(2));
-        assert_eq!(rx.recv_least(), Some(3));
     }
 
     struct TestStruct {
@@ -271,28 +210,6 @@ mod tests {
         assert_eq!(rx.recv_greatest().unwrap().matters, 3);
         assert_eq!(rx.recv_greatest().unwrap().matters, 2);
         assert_eq!(rx.recv_greatest().unwrap().matters, 1);
-
-        let first = TestStruct {
-            matters: 1,
-            _does_not_matter: 3,
-        };
-        let second = TestStruct {
-            matters: 2,
-            _does_not_matter: 1,
-        };
-        let third = TestStruct {
-            matters: 3,
-            _does_not_matter: 2,
-        };
-
-        let (tx, rx) = pmpmc();
-        assert_eq!(tx.send(second), ());
-        assert_eq!(tx.send(third), ());
-        assert_eq!(tx.send(first), ());
-
-        assert_eq!(rx.recv_least().unwrap().matters, 1);
-        assert_eq!(rx.recv_least().unwrap().matters, 2);
-        assert_eq!(rx.recv_least().unwrap().matters, 3);
     }
 
     #[test]
@@ -313,9 +230,9 @@ mod tests {
         let _ = handle1.join();
         let _ = handle2.join();
         let _ = handle3.join();
-        assert_eq!(rx.recv_least(), Some(4));
-        assert_eq!(rx.recv_least(), Some(5));
-        assert_eq!(rx.recv_least(), Some(6));
+        assert_eq!(rx.recv_greatest(), Some(6));
+        assert_eq!(rx.recv_greatest(), Some(5));
+        assert_eq!(rx.recv_greatest(), Some(4));
     }
 
     #[test]
